@@ -64,7 +64,9 @@ public abstract class OAbstractWriteAheadLog implements OWriteAheadLog {
   }
 
   public OLogSequenceNumber logFullCheckpointStart() throws IOException {
-    return log(new OFullCheckpointStartRecord(lastCheckpoint));
+    OFullCheckpointStartRecord start = new OFullCheckpointStartRecord(lastCheckpoint);
+    log(start);
+    return start.getLsn();
   }
 
   public OLogSequenceNumber logFullCheckpointEnd() throws IOException {
@@ -72,7 +74,9 @@ public abstract class OAbstractWriteAheadLog implements OWriteAheadLog {
     try {
       checkForClose();
 
-      return log(new OCheckpointEndRecord());
+      OCheckpointEndRecord end = new OCheckpointEndRecord();
+      log(end);
+      return end.getLsn();
     } finally {
       syncObject.unlock();
     }

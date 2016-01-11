@@ -48,6 +48,8 @@ public interface OWriteAheadLog {
 
   void flush();
 
+  OAtomicOperationLogger selectLogger() throws IOException;
+
   OLogSequenceNumber logAtomicOperationStartRecord(boolean isRollbackSupported, OOperationUnitId unitId) throws IOException;
 
   OLogSequenceNumber logAtomicOperationEndRecord(OOperationUnitId operationUnitId, boolean rollback, OLogSequenceNumber startLsn,

@@ -33,10 +33,7 @@ import com.orientechnologies.orient.core.storage.cache.OReadCache;
 import com.orientechnologies.orient.core.storage.cache.OWriteCache;
 import com.orientechnologies.orient.core.storage.impl.local.OAbstractPaginatedStorage;
 import com.orientechnologies.orient.core.storage.impl.local.paginated.base.ODurableComponent;
-import com.orientechnologies.orient.core.storage.impl.local.paginated.wal.OLogSequenceNumber;
-import com.orientechnologies.orient.core.storage.impl.local.paginated.wal.ONonTxOperationPerformedWALRecord;
-import com.orientechnologies.orient.core.storage.impl.local.paginated.wal.OOperationUnitId;
-import com.orientechnologies.orient.core.storage.impl.local.paginated.wal.OWriteAheadLog;
+import com.orientechnologies.orient.core.storage.impl.local.paginated.wal.*;
 import com.orientechnologies.orient.core.storage.impl.local.statistic.OStoragePerformanceStatistic;
 
 import javax.management.InstanceAlreadyExistsException;
@@ -185,9 +182,10 @@ public class OAtomicOperationsManager implements OAtomicOperationsMangerMXBean {
     assert freezeRequests.get() >= 0;
 
     final OOperationUnitId unitId = OOperationUnitId.generateId();
-    final OLogSequenceNumber lsn = writeAheadLog.logAtomicOperationStartRecord(true, unitId);
+    OAtomicOperationLogger logger = writeAheadLog.selectLogger();
+    final OLogSequenceNumber lsn = logger.logAtomicOperationStartRecord(true, unitId);
 
-    operation = new OAtomicOperation(lsn, unitId, readCache, writeCache, storagePerformanceStatistic, storage.getId());
+    operation = new OAtomicOperation(logger,lsn, unitId, readCache, writeCache, storagePerformanceStatistic, storage.getId());
     currentOperation.set(operation);
 
     if (trackAtomicOperations) {
@@ -371,10 +369,9 @@ public class OAtomicOperationsManager implements OAtomicOperationsMangerMXBean {
 
     if (counter == 0) {
       if (!operation.isRollback())
-        operation.commitChanges(writeAheadLog);
+        operation.commitChanges();
 
-      writeAheadLog
-          .logAtomicOperationEndRecord(operation.getOperationUnitId(), rollback, operation.getStartLSN(), operation.getMetadata());
+      operation.getLogger().logAtomicOperationEndRecord(operation.getOperationUnitId(), rollback, operation.getStartLSN(), operation.getMetadata());
 
       currentOperation.set(null);
 

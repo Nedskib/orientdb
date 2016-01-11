@@ -56,11 +56,11 @@ public class OAtomicOperation {
   private OReadCache                   readCache;
   private OWriteCache                  writeCache;
   private OStoragePerformanceStatistic storagePerformanceStatistic;
+  private OAtomicOperationLogger       logger;
 
   private final Map<String, OAtomicOperationMetadata<?>> metadata = new HashMap<String, OAtomicOperationMetadata<?>>();
 
-  public OAtomicOperation(OLogSequenceNumber startLSN, OOperationUnitId operationUnitId, OReadCache readCache,
-      OWriteCache writeCache, OStoragePerformanceStatistic storagePerformanceStatistic, int storageId) {
+  public OAtomicOperation(OAtomicOperationLogger logger, OLogSequenceNumber startLSN, OOperationUnitId operationUnitId, OReadCache readCache, OWriteCache writeCache, OStoragePerformanceStatistic storagePerformanceStatistic, int storageId) {
     this.storageId = storageId;
     this.startLSN = startLSN;
     this.operationUnitId = operationUnitId;
@@ -68,6 +68,7 @@ public class OAtomicOperation {
     this.readCache = readCache;
     this.writeCache = writeCache;
     this.storagePerformanceStatistic = storagePerformanceStatistic;
+    this.logger = logger;
   }
 
   public OLogSequenceNumber getStartLSN() {
@@ -348,7 +349,7 @@ public class OAtomicOperation {
     fileChanges.truncate = true;
   }
 
-  public void commitChanges(OWriteAheadLog writeAheadLog) throws IOException {
+  public void commitChanges() throws IOException {
     final OSessionStoragePerformanceStatistic sessionStoragePerformanceStatistic = OSessionStoragePerformanceStatistic
         .getStatisticInstance();
     if (sessionStoragePerformanceStatistic != null) {
@@ -359,7 +360,7 @@ public class OAtomicOperation {
 
     try {
       for (long deletedFileId : deletedFiles) {
-        writeAheadLog.log(new OFileDeletedWALRecord(operationUnitId, deletedFileId));
+        logger.log(new OFileDeletedWALRecord(operationUnitId, deletedFileId));
       }
 
       for (Map.Entry<Long, FileChanges> fileChangesEntry : fileChanges.entrySet()) {
@@ -367,15 +368,15 @@ public class OAtomicOperation {
         final long fileId = fileChangesEntry.getKey();
 
         if (fileChanges.isNew)
-          writeAheadLog.log(new OFileCreatedWALRecord(operationUnitId, fileChanges.fileName, fileId));
+          logger.log(new OFileCreatedWALRecord(operationUnitId, fileChanges.fileName, fileId));
         else if (fileChanges.truncate)
-          writeAheadLog.log(new OFileTruncatedWALRecord(operationUnitId, fileId));
+          logger.log(new OFileTruncatedWALRecord(operationUnitId, fileId));
 
         for (Map.Entry<Long, FilePageChanges> filePageChangesEntry : fileChanges.pageChangesMap.entrySet()) {
           final long pageIndex = filePageChangesEntry.getKey();
           final FilePageChanges filePageChanges = filePageChangesEntry.getValue();
 
-          filePageChanges.lsn = writeAheadLog
+          filePageChanges.lsn = logger
               .log(new OUpdatePageRecord(pageIndex, fileId, operationUnitId, filePageChanges.changes));
         }
       }
@@ -521,5 +522,9 @@ public class OAtomicOperation {
     }
 
     return fileId;
+  }
+
+  public OAtomicOperationLogger getLogger() {
+    return logger;
   }
 }

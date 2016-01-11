@@ -29,7 +29,7 @@ import java.util.zip.CRC32;
 /**
  * Created by tglman on 08/01/16.
  */
-final class LogSegment implements Comparable<LogSegment> {
+final class OLogSegment implements Comparable<OLogSegment> {
   private       ODiskWriteAheadLog oDiskWriteAheadLog;
   private final RandomAccessFile   rndFile;
   private final File               file;
@@ -51,6 +51,7 @@ final class LogSegment implements Comparable<LogSegment> {
   private long     nextPositionToFlush;
   private OLogSequenceNumber last = null;
   private OLogSequenceNumber pendingLSNToFlush;
+  private OLogSequenceNumber flushedLsn;
 
   private volatile boolean flushNewData = true;
 
@@ -63,14 +64,14 @@ final class LogSegment implements Comparable<LogSegment> {
     @Override
     public void run() {
       try {
-        LogSegment.this.commit();
+        OLogSegment.this.commit();
       } catch (Throwable e) {
         OLogManager.instance().error(this, "Error during WAL background flush", e);
       }
     }
   }
 
-  LogSegment(ODiskWriteAheadLog oDiskWriteAheadLog, File file, int maxPagesCacheSize) throws IOException {
+  OLogSegment(ODiskWriteAheadLog oDiskWriteAheadLog, File file, int maxPagesCacheSize) throws IOException {
     this.oDiskWriteAheadLog = oDiskWriteAheadLog;
     this.file = file;
     this.maxPagesCacheSize = maxPagesCacheSize;
@@ -173,7 +174,7 @@ final class LogSegment implements Comparable<LogSegment> {
     nextPositionToFlush = filePointer - OWALPage.PAGE_SIZE;
 
     if (lastLSNToFlush != null)
-      oDiskWriteAheadLog.setFlushedLsn(lastLSNToFlush);
+      this.flushedLsn = lastLSNToFlush;
 
     for (int i = 0; i < flushedPages - 1; i++) {
       OWALPage page = pagesCache.poll();
@@ -215,7 +216,7 @@ final class LogSegment implements Comparable<LogSegment> {
   }
 
   @Override
-  public int compareTo(LogSegment other) {
+  public int compareTo(OLogSegment other) {
     final long otherOrder = other.order;
 
     if (order > otherOrder)
@@ -233,7 +234,7 @@ final class LogSegment implements Comparable<LogSegment> {
     if (o == null || getClass() != o.getClass())
       return false;
 
-    LogSegment that = (LogSegment) o;
+    OLogSegment that = (OLogSegment) o;
 
     return order == that.order;
 
@@ -480,6 +481,11 @@ final class LogSegment implements Comparable<LogSegment> {
     return new OLogSequenceNumber(order, filledUpTo - 1);
   }
 
+  public void loadFlushedLSN() throws IOException {
+    flushedLsn = readFlushedLSN();
+  }
+
+
   public void flush() {
     if (!commitExecutor.isShutdown()) {
       try {
@@ -564,5 +570,9 @@ final class LogSegment implements Comparable<LogSegment> {
 
   public long getFilledUpTo() {
     return filledUpTo;
+  }
+
+  public OLogSequenceNumber getFlushedLsn() {
+    return flushedLsn;
   }
 }
