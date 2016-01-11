@@ -362,7 +362,7 @@ public class ODiskWriteAheadLog extends OAbstractWriteAheadLog {
       final OLogSequenceNumber lsn = last.logRecord(serializedForm);
 
 
-      if (record.isUpdateMasterRecord()) {
+      if (record instanceof  OAbstractCheckPointStartRecord) {
         lastCheckpoint = lsn;
         if (useFirstMasterRecord) {
           firstMasterRecord = lsn;

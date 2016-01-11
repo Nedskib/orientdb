@@ -79,8 +79,4 @@ public class OFileCreatedWALRecord extends OOperationUnitBodyRecord {
     return super.serializedSize() + OStringSerializer.INSTANCE.getObjectSize(fileName) + OLongSerializer.LONG_SIZE;
   }
 
-  @Override
-  public boolean isUpdateMasterRecord() {
-    return false;
-  }
 }

@@ -164,11 +164,6 @@ public class WALSegmentCreation {
     }
 
     @Override
-    public boolean isUpdateMasterRecord() {
-      return false;
-    }
-
-    @Override
     public boolean equals(Object o) {
       if (this == o)
         return true;
@@ -232,11 +227,6 @@ public class WALSegmentCreation {
     @Override
     public int serializedSize() {
       return OIntegerSerializer.INT_SIZE + data.length + 1;
-    }
-
-    @Override
-    public boolean isUpdateMasterRecord() {
-      return false;
     }
 
     @Override

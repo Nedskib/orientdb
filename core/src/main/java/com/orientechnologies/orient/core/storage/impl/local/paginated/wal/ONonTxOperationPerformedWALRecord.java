@@ -20,8 +20,4 @@ public class ONonTxOperationPerformedWALRecord extends OAbstractWALRecord {
     return 0;
   }
 
-  @Override
-  public boolean isUpdateMasterRecord() {
-    return false;
-  }
 }

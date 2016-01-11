@@ -42,8 +42,4 @@ public class OFileDeletedWALRecord extends OOperationUnitBodyRecord {
     return super.serializedSize() + OLongSerializer.LONG_SIZE;
   }
 
-  @Override
-  public boolean isUpdateMasterRecord() {
-    return false;
-  }
 }

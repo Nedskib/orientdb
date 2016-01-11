@@ -42,8 +42,4 @@ public class OCheckpointEndRecord extends OAbstractWALRecord {
     return 0;
   }
 
-  @Override
-  public boolean isUpdateMasterRecord() {
-    return false;
-  }
 }

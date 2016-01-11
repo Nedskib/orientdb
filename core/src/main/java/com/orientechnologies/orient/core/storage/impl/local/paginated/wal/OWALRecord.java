@@ -31,8 +31,6 @@ public interface OWALRecord {
 
   int serializedSize();
 
-  boolean isUpdateMasterRecord();
-
   OLogSequenceNumber getLsn();
 
   void setLsn(OLogSequenceNumber lsn);

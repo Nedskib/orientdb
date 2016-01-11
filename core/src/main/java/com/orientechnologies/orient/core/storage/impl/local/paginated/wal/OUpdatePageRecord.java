@@ -67,11 +67,6 @@ public class OUpdatePageRecord extends OAbstractPageWALRecord {
   }
 
   @Override
-  public boolean isUpdateMasterRecord() {
-    return false;
-  }
-
-  @Override
   public boolean equals(final Object o) {
     if (this == o)
       return true;

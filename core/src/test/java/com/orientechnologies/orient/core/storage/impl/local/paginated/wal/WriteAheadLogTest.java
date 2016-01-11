@@ -1689,7 +1689,6 @@ public class WriteAheadLogTest {
       return OIntegerSerializer.INT_SIZE + data.length + 1;
     }
 
-    @Override
     public boolean isUpdateMasterRecord() {
       return updateMasterRecord;
     }

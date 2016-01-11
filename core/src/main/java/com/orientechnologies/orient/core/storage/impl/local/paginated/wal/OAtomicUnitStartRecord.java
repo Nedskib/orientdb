@@ -68,11 +68,6 @@ public class OAtomicUnitStartRecord extends OOperationUnitRecord {
   }
 
   @Override
-  public boolean isUpdateMasterRecord() {
-    return false;
-  }
-
-  @Override
   public String toString() {
     return toString("isRollbackSupported=" + isRollbackSupported);
   }

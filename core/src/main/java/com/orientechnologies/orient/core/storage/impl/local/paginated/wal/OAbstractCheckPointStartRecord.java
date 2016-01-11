@@ -89,11 +89,6 @@ public abstract class OAbstractCheckPointStartRecord extends OAbstractWALRecord 
   }
 
   @Override
-  public boolean isUpdateMasterRecord() {
-    return true;
-  }
-
-  @Override
   public boolean equals(Object o) {
     if (this == o)
       return true;
