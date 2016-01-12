@@ -20,7 +20,9 @@ import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.lang.ref.WeakReference;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.Iterator;
+import java.util.Set;
 import java.util.concurrent.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -56,6 +58,25 @@ final class OLogSegment implements Comparable<OLogSegment> {
   private volatile boolean flushNewData = true;
 
   private WeakReference<OPair<OLogSequenceNumber, byte[]>> lastReadRecord = new WeakReference<OPair<OLogSequenceNumber, byte[]>>(null);
+
+  private final Set<OOperationUnitId> activeOperations = new HashSet<OOperationUnitId>();
+  private boolean closedSegment;
+
+  public OLogSequenceNumber logStartOperationRecord(byte[] serializedForm, OOperationUnitId unitId) throws IOException {
+    OLogSequenceNumber lsn = logRecord(serializedForm);
+    activeOperations.add(unitId);
+    return lsn;
+  }
+
+  public OLogSequenceNumber logEndOperationRecord(byte[] serializedForm, OOperationUnitId operationUnitId) throws IOException {
+    OLogSequenceNumber lsn = logRecord(serializedForm);
+    activeOperations.remove(operationUnitId);
+    if (closedSegment && activeOperations.size() == 0) {
+      stopFlush(true);
+      oDiskWriteAheadLog.closeSegment(this);
+    }
+    return lsn;
+  }
 
   private final class FlushTask implements Runnable {
     private FlushTask() {
@@ -283,73 +304,84 @@ final class OLogSegment implements Comparable<OLogSegment> {
   }
 
   public OLogSequenceNumber logRecord(byte[] record) throws IOException {
-    flushNewData = true;
-    int pageOffset = (int) (filledUpTo % OWALPage.PAGE_SIZE);
-    long pageIndex = filledUpTo / OWALPage.PAGE_SIZE;
+    oDiskWriteAheadLog.lockStart();
+    try {
+      flushNewData = true;
+      long preFilled = filledUpTo;
+      int pageOffset = (int) (filledUpTo % OWALPage.PAGE_SIZE);
+      long pageIndex = filledUpTo / OWALPage.PAGE_SIZE;
 
-    if (pageOffset == 0 && pageIndex > 0)
-      pageIndex--;
+      if (pageOffset == 0 && pageIndex > 0)
+        pageIndex--;
 
-    int pos = 0;
-    boolean firstChunk = true;
+      int pos = 0;
+      boolean firstChunk = true;
 
-    OLogSequenceNumber lsn = null;
+      OLogSequenceNumber lsn = null;
 
-    while (pos < record.length) {
-      if (currentPage == null) {
-        ODirectMemoryPointer pointer = ODirectMemoryPointerFactory.instance().createPointer(OWALPage.PAGE_SIZE);
-        currentPage = new OWALPage(pointer, true);
-        pagesCache.add(currentPage);
-        filledUpTo += OWALPage.RECORDS_OFFSET;
-      }
-
-      int freeSpace = currentPage.getFreeSpace();
-      if (freeSpace < OWALPage.MIN_RECORD_SIZE) {
-        filledUpTo += freeSpace + OWALPage.RECORDS_OFFSET;
-        ODirectMemoryPointer pointer = ODirectMemoryPointerFactory.instance().createPointer(OWALPage.PAGE_SIZE);
-        currentPage = new OWALPage(pointer, true);
-        pagesCache.add(currentPage);
-        pageIndex++;
-
-        freeSpace = currentPage.getFreeSpace();
-      }
-
-      final OWALPage walPage = currentPage;
-      synchronized (walPage) {
-        final int entrySize = OWALPage.calculateSerializedSize(record.length - pos);
-        int addedChunkOffset;
-        if (entrySize <= freeSpace) {
-          if (pos == 0)
-            addedChunkOffset = walPage.appendRecord(record, false, !firstChunk);
-          else
-            addedChunkOffset = walPage.appendRecord(Arrays.copyOfRange(record, pos, record.length), false, !firstChunk);
-
-          pos = record.length;
-        } else {
-          int chunkSize = OWALPage.calculateRecordSize(freeSpace);
-          if (chunkSize > record.length - pos)
-            chunkSize = record.length - pos;
-
-          addedChunkOffset = walPage.appendRecord(Arrays.copyOfRange(record, pos, pos + chunkSize), true, !firstChunk);
-          pos += chunkSize;
+      while (pos < record.length) {
+        if (currentPage == null) {
+          ODirectMemoryPointer pointer = ODirectMemoryPointerFactory.instance().createPointer(OWALPage.PAGE_SIZE);
+          currentPage = new OWALPage(pointer, true);
+          pagesCache.add(currentPage);
+          filledUpTo += OWALPage.RECORDS_OFFSET;
         }
 
-        if (firstChunk)
-          lsn = new OLogSequenceNumber(order, pageIndex * OWALPage.PAGE_SIZE + addedChunkOffset);
+        int freeSpace = currentPage.getFreeSpace();
+        if (freeSpace < OWALPage.MIN_RECORD_SIZE) {
+          filledUpTo += freeSpace + OWALPage.RECORDS_OFFSET;
+          ODirectMemoryPointer pointer = ODirectMemoryPointerFactory.instance().createPointer(OWALPage.PAGE_SIZE);
+          currentPage = new OWALPage(pointer, true);
+          pagesCache.add(currentPage);
+          pageIndex++;
 
-        int spaceDiff = freeSpace - walPage.getFreeSpace();
-        filledUpTo += spaceDiff;
+          freeSpace = currentPage.getFreeSpace();
+        }
 
-        firstChunk = false;
+        final OWALPage walPage = currentPage;
+        synchronized (walPage) {
+          final int entrySize = OWALPage.calculateSerializedSize(record.length - pos);
+          int addedChunkOffset;
+          if (entrySize <= freeSpace) {
+            if (pos == 0)
+              addedChunkOffset = walPage.appendRecord(record, false, !firstChunk);
+            else
+              addedChunkOffset = walPage.appendRecord(Arrays.copyOfRange(record, pos, record.length), false, !firstChunk);
+
+            pos = record.length;
+          } else {
+            int chunkSize = OWALPage.calculateRecordSize(freeSpace);
+            if (chunkSize > record.length - pos)
+              chunkSize = record.length - pos;
+
+            addedChunkOffset = walPage.appendRecord(Arrays.copyOfRange(record, pos, pos + chunkSize), true, !firstChunk);
+            pos += chunkSize;
+          }
+
+          if (firstChunk)
+            lsn = new OLogSequenceNumber(order, pageIndex * OWALPage.PAGE_SIZE + addedChunkOffset);
+
+          int spaceDiff = freeSpace - walPage.getFreeSpace();
+          filledUpTo += spaceDiff;
+
+          firstChunk = false;
+        }
       }
-    }
 
-    if (pagesCache.size() > maxPagesCacheSize) {
-      OLogManager.instance().info(this, "Max cache limit is reached (%d vs. %d), sync flush is performed", maxPagesCacheSize, pagesCache.size());
-      flush();
-    }
+      if (pagesCache.size() > maxPagesCacheSize) {
+        OLogManager.instance().info(this, "Max cache limit is reached (%d vs. %d), sync flush is performed", maxPagesCacheSize, pagesCache.size());
+        flush();
+      }
+      if (filledUpTo() >= oDiskWriteAheadLog.getMaxSegmentSize()) {
+        oDiskWriteAheadLog.swapToNewSegment();
+        closedSegment = true;
+      }
 
-    last = lsn;
+      oDiskWriteAheadLog.loggedSize(filledUpTo - preFilled);
+      last = lsn;
+    }finally {
+      oDiskWriteAheadLog.lockEnd();
+    }
     return last;
   }
 
@@ -575,4 +607,6 @@ final class OLogSegment implements Comparable<OLogSegment> {
   public OLogSequenceNumber getFlushedLsn() {
     return flushedLsn;
   }
+
+
 }

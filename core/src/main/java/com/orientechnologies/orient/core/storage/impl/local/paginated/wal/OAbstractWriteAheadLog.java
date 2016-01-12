@@ -97,4 +97,12 @@ public abstract class OAbstractWriteAheadLog implements OWriteAheadLog {
     if (closed)
       throw new OStorageException("WAL has been closed");
   }
+
+  public void swapToNewSegment() throws IOException {}
+
+  public void closeSegment(OLogSegment oLogSegment){}
+
+  public void lockEnd() {};
+
+  public void lockStart(){};
 }

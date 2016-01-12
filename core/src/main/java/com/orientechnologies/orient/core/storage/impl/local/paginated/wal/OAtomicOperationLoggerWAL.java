@@ -9,25 +9,41 @@ import java.util.Map;
  * Created by tglman on 11/01/16.
  */
 public class OAtomicOperationLoggerWAL implements OAtomicOperationLogger {
-  private OWriteAheadLog oDiskWriteAheadLog;
+  private OLogSegment oLogSegment;
 
-  public OAtomicOperationLoggerWAL(OWriteAheadLog oDiskWriteAheadLog) {
-    this.oDiskWriteAheadLog = oDiskWriteAheadLog;
+  public OAtomicOperationLoggerWAL(OLogSegment oLogSegment) {
+    this.oLogSegment = oLogSegment;
   }
 
   @Override
   public OLogSequenceNumber log(OWALRecord record) throws IOException {
-    return oDiskWriteAheadLog.log(record);
+    if (this.oLogSegment == null)
+      return new OLogSequenceNumber(Long.MAX_VALUE, Long.MAX_VALUE);
+    final byte[] serializedForm = OWALRecordsFactory.INSTANCE.toStream(record);
+    OLogSequenceNumber lsn = oLogSegment.logRecord(serializedForm);
+    record.setLsn(lsn);
+    return lsn;
   }
 
   @Override
-  public OLogSequenceNumber logAtomicOperationStartRecord(boolean b, OOperationUnitId unitId) throws IOException {
-    return oDiskWriteAheadLog.logAtomicOperationStartRecord(b, unitId);
+  public OLogSequenceNumber logAtomicOperationStartRecord(boolean isRollbackSupported, OOperationUnitId unitId) throws IOException {
+    if (this.oLogSegment == null)
+      return new OLogSequenceNumber(Long.MAX_VALUE, Long.MAX_VALUE);
+    OAtomicUnitStartRecord record = new OAtomicUnitStartRecord(isRollbackSupported, unitId);
+    final byte[] serializedForm = OWALRecordsFactory.INSTANCE.toStream(record);
+    OLogSequenceNumber lsn = oLogSegment.logStartOperationRecord(serializedForm, unitId);
+    record.setLsn(lsn);
+    return lsn;
   }
 
   @Override
   public void logAtomicOperationEndRecord(OOperationUnitId operationUnitId, boolean rollback, OLogSequenceNumber startLSN, Map<String, OAtomicOperationMetadata<?>> metadata) throws IOException {
-    oDiskWriteAheadLog.logAtomicOperationEndRecord(operationUnitId, rollback, startLSN, metadata);
+    if (this.oLogSegment == null)
+      return;
+    OAtomicUnitEndRecord end = new OAtomicUnitEndRecord(operationUnitId, rollback, metadata);
+    final byte[] serializedForm = OWALRecordsFactory.INSTANCE.toStream(end);
+    OLogSequenceNumber lsn = oLogSegment.logEndOperationRecord(serializedForm, operationUnitId);
+    end.setLsn(lsn);
   }
 
 

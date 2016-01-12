@@ -48,22 +48,18 @@ public class OMemoryWriteAheadLog extends OAbstractWriteAheadLog {
 
   @Override
   public OAtomicOperationLogger selectLogger() throws IOException {
-    return new OAtomicOperationLoggerWAL(this);
+    return new OAtomicOperationLoggerWAL(null);
   }
 
   @Override
   public OLogSequenceNumber logAtomicOperationStartRecord(boolean isRollbackSupported, OOperationUnitId unitId) throws IOException {
-    OAtomicUnitStartRecord record = new OAtomicUnitStartRecord(isRollbackSupported, unitId);
-    log(record);
-    return record.getLsn();
+    return new OLogSequenceNumber(Long.MAX_VALUE, Long.MAX_VALUE);
   }
 
   @Override
   public OLogSequenceNumber logAtomicOperationEndRecord(OOperationUnitId operationUnitId, boolean rollback,
       OLogSequenceNumber startLsn, Map<String, OAtomicOperationMetadata<?>> atomicOperationMetadata) throws IOException {
-    OAtomicUnitEndRecord record = new OAtomicUnitEndRecord(operationUnitId, rollback, atomicOperationMetadata);
-    log(record);
-    return record.getLsn();
+    return new OLogSequenceNumber(Long.MAX_VALUE, Long.MAX_VALUE);
   }
 
   @Override

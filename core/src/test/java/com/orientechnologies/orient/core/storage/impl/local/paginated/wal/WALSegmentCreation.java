@@ -104,16 +104,18 @@ public class WALSegmentCreation {
 
       while (!stop) {
         OOperationUnitId operationUnitId = OOperationUnitId.generateId();
-        writeAheadLog.logAtomicOperationStartRecord(true, operationUnitId);
-        writeAheadLog.log(new TestRecordOne(100, operationUnitId));
-        writeAheadLog.log(new TestRecordOne(200, operationUnitId));
-        writeAheadLog.log(new TestRecordTwo(100));
-        writeAheadLog.log(new TestRecordOne(300, operationUnitId));
-        writeAheadLog.log(new TestRecordOne(200, operationUnitId));
-        writeAheadLog.log(new TestRecordTwo(200));
-        writeAheadLog.log(new TestRecordOne(100, operationUnitId));
-        writeAheadLog.logAtomicOperationEndRecord(operationUnitId, false, new OLogSequenceNumber(0, 0), null);
-        writeAheadLog.log(new TestRecordTwo(100));
+        OAtomicOperationLogger logger = writeAheadLog.selectLogger();
+        logger.logAtomicOperationStartRecord(true, operationUnitId);
+        logger.log(new TestRecordOne(100, operationUnitId));
+        logger.log(new TestRecordOne(200, operationUnitId));
+        logger.log(new TestRecordTwo(100));
+        logger.log(new TestRecordOne(300, operationUnitId));
+        logger.log(new TestRecordOne(200, operationUnitId));
+        logger.log(new TestRecordTwo(200));
+        logger.log(new TestRecordOne(100, operationUnitId));
+        logger.logAtomicOperationEndRecord(operationUnitId, false, new OLogSequenceNumber(0, 0), null);
+        logger = writeAheadLog.selectLogger();
+        logger.log(new TestRecordTwo(100));
       }
 
       return null;
