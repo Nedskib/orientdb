@@ -1,7 +1,6 @@
 package com.orientechnologies.orient.core.storage.impl.local.paginated.wal;
 
-import com.orientechnologies.common.directmemory.ODirectMemoryPointer;
-import com.orientechnologies.common.directmemory.ODirectMemoryPointerFactory;
+import com.orientechnologies.common.directmemory.OByteBufferPool;
 import com.orientechnologies.common.exception.OException;
 import com.orientechnologies.common.io.OFileUtils;
 import com.orientechnologies.common.log.OLogManager;
@@ -19,6 +18,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.lang.ref.WeakReference;
+import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -32,6 +32,7 @@ import java.util.zip.CRC32;
  * Created by tglman on 08/01/16.
  */
 final class OLogSegment implements Comparable<OLogSegment> {
+  private final OByteBufferPool    byteBufferPool = OByteBufferPool.instance();
   private       ODiskWriteAheadLog oDiskWriteAheadLog;
   private final RandomAccessFile   rndFile;
   private final File               file;
@@ -134,7 +135,7 @@ final class OLogSegment implements Comparable<OLogSegment> {
 
     final int maxSize = pagesCache.size();
 
-    ODirectMemoryPointer[] pagesToFlush = new ODirectMemoryPointer[maxSize];
+    ByteBuffer[] pagesToFlush = new ByteBuffer[maxSize];
 
     long filePointer = nextPositionToFlush;
 
@@ -162,15 +163,24 @@ final class OLogSegment implements Comparable<OLogSegment> {
           pos += page.getSerializedRecordSize(pos);
         }
 
-        ODirectMemoryPointer dataPointer;
+        final ByteBuffer dataBuffer;
+
         if (flushedPages == maxSize - 1) {
-          dataPointer = ODirectMemoryPointerFactory.instance().createPointer(OWALPage.PAGE_SIZE);
-          page.getPagePointer().moveData(0, dataPointer, 0, OWALPage.PAGE_SIZE);
+          dataBuffer = byteBufferPool.acquireDirect(false);
+
+          final ByteBuffer pageBuffer = page.getByteBuffer();
+
+          pageBuffer.position(0);
+          dataBuffer.position(0);
+
+          dataBuffer.put(pageBuffer);
         } else {
-          dataPointer = page.getPagePointer();
+          ByteBuffer buffer = page.getByteBuffer();
+          dataBuffer = buffer.duplicate();
+          dataBuffer.order(buffer.order());
         }
 
-        pagesToFlush[flushedPages] = dataPointer;
+        pagesToFlush[flushedPages] = dataBuffer;
       }
 
       flushedPages++;
@@ -179,10 +189,13 @@ final class OLogSegment implements Comparable<OLogSegment> {
     synchronized (rndFile) {
       rndFile.seek(filePointer);
       for (int i = 0; i < pagesToFlush.length; i++) {
-        ODirectMemoryPointer dataPointer = pagesToFlush[i];
-        byte[] pageContent = dataPointer.get(0, OWALPage.PAGE_SIZE);
+        final ByteBuffer dataBuffer = pagesToFlush[i];
+        byte[] pageContent = new byte[OWALPage.PAGE_SIZE];
+        dataBuffer.position(0);
+        dataBuffer.get(pageContent);
+
         if (i == pagesToFlush.length - 1)
-          dataPointer.free();
+          byteBufferPool.release(dataBuffer);
 
         flushPage(pageContent);
         filePointer += OWALPage.PAGE_SIZE;
@@ -195,18 +208,18 @@ final class OLogSegment implements Comparable<OLogSegment> {
     nextPositionToFlush = filePointer - OWALPage.PAGE_SIZE;
 
     if (lastLSNToFlush != null)
-      this.flushedLsn = lastLSNToFlush;
+      flushedLsn = lastLSNToFlush;
 
     for (int i = 0; i < flushedPages - 1; i++) {
       OWALPage page = pagesCache.poll();
-      page.getPagePointer().free();
+      byteBufferPool.release(page.getByteBuffer());
     }
 
     assert !pagesCache.isEmpty();
 
     final long freeSpace = oDiskWriteAheadLog.getWalLocation().getFreeSpace();
     if (freeSpace < oDiskWriteAheadLog.getFreeSpaceLimit()) {
-      for (WeakReference<OLowDiskSpaceListener> listenerWeakReference : oDiskWriteAheadLog.getLowDiskSpaceListeners()) {
+      for (WeakReference<OLowDiskSpaceListener> listenerWeakReference : oDiskWriteAheadLog.getLowDiskSpaceListeners() ) {
         final OLowDiskSpaceListener lowDiskSpaceListener = listenerWeakReference.get();
 
         if (lowDiskSpaceListener != null)
@@ -306,8 +319,8 @@ final class OLogSegment implements Comparable<OLogSegment> {
   public OLogSequenceNumber logRecord(byte[] record) throws IOException {
     oDiskWriteAheadLog.lockStart();
     try {
-      flushNewData = true;
       long preFilled = filledUpTo;
+      flushNewData = true;
       int pageOffset = (int) (filledUpTo % OWALPage.PAGE_SIZE);
       long pageIndex = filledUpTo / OWALPage.PAGE_SIZE;
 
@@ -321,8 +334,7 @@ final class OLogSegment implements Comparable<OLogSegment> {
 
       while (pos < record.length) {
         if (currentPage == null) {
-          ODirectMemoryPointer pointer = ODirectMemoryPointerFactory.instance().createPointer(OWALPage.PAGE_SIZE);
-          currentPage = new OWALPage(pointer, true);
+          currentPage = new OWALPage(byteBufferPool.acquireDirect(false), true);
           pagesCache.add(currentPage);
           filledUpTo += OWALPage.RECORDS_OFFSET;
         }
@@ -330,8 +342,7 @@ final class OLogSegment implements Comparable<OLogSegment> {
         int freeSpace = currentPage.getFreeSpace();
         if (freeSpace < OWALPage.MIN_RECORD_SIZE) {
           filledUpTo += freeSpace + OWALPage.RECORDS_OFFSET;
-          ODirectMemoryPointer pointer = ODirectMemoryPointerFactory.instance().createPointer(OWALPage.PAGE_SIZE);
-          currentPage = new OWALPage(pointer, true);
+          currentPage = new OWALPage(byteBufferPool.acquireDirect(false), true);
           pagesCache.add(currentPage);
           pageIndex++;
 
@@ -366,6 +377,12 @@ final class OLogSegment implements Comparable<OLogSegment> {
 
           firstChunk = false;
         }
+      }
+
+      if (pagesCache.size() > maxPagesCacheSize) {
+        OLogManager.instance()
+          .info(this, "Max cache limit is reached (%d vs. %d), sync flush is performed", maxPagesCacheSize, pagesCache.size());
+        flush();
       }
 
       if (pagesCache.size() > maxPagesCacheSize) {
@@ -415,9 +432,10 @@ final class OLogSegment implements Comparable<OLogSegment> {
       if (!checkPageIntegrity(pageContent))
         throw new OWALPageBrokenException("WAL page with index " + pageIndex + " is broken");
 
-      ODirectMemoryPointer pointer = ODirectMemoryPointerFactory.instance().createPointer(pageContent);
+      final ByteBuffer buffer = byteBufferPool.acquireDirect(false);
+      buffer.put(pageContent);
       try {
-        OWALPage page = new OWALPage(pointer, false);
+        OWALPage page = new OWALPage(buffer, false);
 
         byte[] content = page.getRecord(pageOffset);
         if (record == null)
@@ -442,7 +460,7 @@ final class OLogSegment implements Comparable<OLogSegment> {
           break;
         }
       } finally {
-        pointer.free();
+        byteBufferPool.release(buffer);
       }
     }
 
@@ -498,7 +516,7 @@ final class OLogSegment implements Comparable<OLogSegment> {
 
       if (!pagesCache.isEmpty()) {
         for (OWALPage page : pagesCache)
-          page.getPagePointer().free();
+          byteBufferPool.release(page.getByteBuffer());
       }
 
       currentPage = null;
@@ -544,13 +562,14 @@ final class OLogSegment implements Comparable<OLogSegment> {
       rndFile.readFully(content);
 
       if (checkPageIntegrity(content)) {
-        ODirectMemoryPointer pointer = ODirectMemoryPointerFactory.instance().createPointer(content);
-        currentPage = new OWALPage(pointer, false);
+        final ByteBuffer pageBuffer = byteBufferPool.acquireDirect(false);
+        pageBuffer.put(content);
+        currentPage = new OWALPage(pageBuffer, false);
         filledUpTo = (pagesCount - 1) * OWALPage.PAGE_SIZE + currentPage.getFilledUpTo();
         nextPositionToFlush = (pagesCount - 1) * OWALPage.PAGE_SIZE;
       } else {
-        ODirectMemoryPointer pointer = ODirectMemoryPointerFactory.instance().createPointer(OWALPage.PAGE_SIZE);
-        currentPage = new OWALPage(pointer, true);
+        final ByteBuffer pageBuffer = byteBufferPool.acquireDirect(false);
+        currentPage = new OWALPage(pageBuffer, true);
         filledUpTo = pagesCount * OWALPage.PAGE_SIZE + currentPage.getFilledUpTo();
         nextPositionToFlush = pagesCount * OWALPage.PAGE_SIZE;
       }
